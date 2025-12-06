@@ -228,7 +228,7 @@ def organize_photos(src, dest, copy_mode=False):
                 stats['copied'] += 1
                 print(f"Copied: {filepath} -> {dest_path}")
             else:
-                shutil.move(str(filepath), str(dest_path))
+                shutil.move(filepath, dest_path)
                 stats['moved'] += 1
                 print(f"Moved: {filepath} -> {dest_path}")
                 
