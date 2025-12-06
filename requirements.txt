@@ -1,0 +1,4 @@
+# photoHdler dependencies
+
+# Optional: For EXIF data extraction
+Pillow>=9.0.0
