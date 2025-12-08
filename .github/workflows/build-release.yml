@@ -3,7 +3,8 @@ name: Build and Release Windows Executable
 on:
   push:
     tags:
-      - '*'
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -27,11 +28,45 @@ jobs:
       
       - name: Build executable with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --name main main.py
+          pyinstaller --onefile --windowed --name PhotoOrganizer --icon=NONE main.py
       
-      - name: Upload Release Asset
+      - name: Get version from tag
+        id: get_version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=dev-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/main.exe
+          files: dist/PhotoOrganizer.exe
+          name: PhotoHdler ${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## PhotoHdler - 照片整理工具
+            
+            ### 下载 (Download)
+            点击下方的 `PhotoOrganizer.exe` 下载可执行程序
+            
+            ### 使用说明 (Usage)
+            1. 双击运行 PhotoOrganizer.exe
+            2. 选择源目录（包含照片的文件夹）
+            3. 选择目标目录（整理后照片的保存位置）
+            4. 可选：勾选"复制模式"保留原始文件
+            5. 点击"开始整理"按钮
+            
+            ### 功能特性 (Features)
+            - 📸 根据照片拍摄日期自动整理
+            - 📁 按年/月自动创建文件夹
+            - 🔄 支持复制或移动模式
+            - 🖼️ 支持 JPEG, PNG, BMP, GIF, TIFF 等格式
+            - 📊 实时显示处理进度
+            
+            ### 系统要求 (Requirements)
+            - Windows 10/11
+            - 无需安装Python环境
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
