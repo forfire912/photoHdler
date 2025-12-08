@@ -159,11 +159,11 @@ class PhotoOrganizerGUI:
         """Initialize the GUI."""
         self.root = root
         self.root.title("照片视频整理工具 - Photo Organizer")
-        self.root.geometry("700x550")
-        self.root.minsize(600, 450)
+        self.root.geometry("700x600")
+        self.root.minsize(600, 500)
         
         # Variables
-        self.src_var = tk.StringVar()
+        self.src_dirs = []  # List of source directories
         self.dest_var = tk.StringVar()
         self.copy_mode_var = tk.BooleanVar(value=False)
         self.is_running = False
@@ -179,8 +179,8 @@ class PhotoOrganizerGUI:
         # Configure grid weights
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(4, weight=1)
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.rowconfigure(5, weight=1)
         
         # Title
         title_label = ttk.Label(
@@ -188,31 +188,60 @@ class PhotoOrganizerGUI:
             text="照片视频整理工具", 
             font=("Arial", 16, "bold")
         )
-        title_label.grid(row=0, column=0, columnspan=3, pady=(0, 15))
+        title_label.grid(row=0, column=0, sticky="ew", pady=(0, 15))
         
-        # Source directory
-        ttk.Label(main_frame, text="源目录 (Source):").grid(
-            row=1, column=0, sticky="w", pady=5
-        )
-        src_entry = ttk.Entry(main_frame, textvariable=self.src_var, width=50)
-        src_entry.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+        # Source directories section
+        src_frame = ttk.LabelFrame(main_frame, text="源目录 (Source Directories)", padding="5")
+        src_frame.grid(row=1, column=0, sticky="nsew", pady=5)
+        src_frame.columnconfigure(0, weight=1)
+        src_frame.rowconfigure(0, weight=1)
+        
+        # Listbox for source directories
+        listbox_frame = ttk.Frame(src_frame)
+        listbox_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        listbox_frame.columnconfigure(0, weight=1)
+        listbox_frame.rowconfigure(0, weight=1)
+        
+        self.src_listbox = tk.Listbox(listbox_frame, height=4, selectmode=tk.EXTENDED)
+        self.src_listbox.grid(row=0, column=0, sticky="nsew")
+        
+        scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical", command=self.src_listbox.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.src_listbox.config(yscrollcommand=scrollbar.set)
+        
+        # Buttons for source directories
+        src_buttons_frame = ttk.Frame(src_frame)
+        src_buttons_frame.grid(row=0, column=1, padx=5, pady=5)
+        
         ttk.Button(
-            main_frame, text="浏览...", command=self._browse_src
-        ).grid(row=1, column=2, pady=5)
+            src_buttons_frame, text="添加目录\nAdd Dir", command=self._add_src_dir, width=12
+        ).pack(pady=2)
+        
+        ttk.Button(
+            src_buttons_frame, text="删除选中\nRemove", command=self._remove_src_dir, width=12
+        ).pack(pady=2)
+        
+        ttk.Button(
+            src_buttons_frame, text="清空全部\nClear All", command=self._clear_src_dirs, width=12
+        ).pack(pady=2)
         
         # Destination directory
-        ttk.Label(main_frame, text="目标目录 (Dest):").grid(
-            row=2, column=0, sticky="w", pady=5
+        dest_frame = ttk.Frame(main_frame)
+        dest_frame.grid(row=2, column=0, sticky="ew", pady=5)
+        dest_frame.columnconfigure(1, weight=1)
+        
+        ttk.Label(dest_frame, text="目标目录 (Dest):").grid(
+            row=0, column=0, sticky="w", padx=5
         )
-        dest_entry = ttk.Entry(main_frame, textvariable=self.dest_var, width=50)
-        dest_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
+        dest_entry = ttk.Entry(dest_frame, textvariable=self.dest_var, width=50)
+        dest_entry.grid(row=0, column=1, sticky="ew", padx=5)
         ttk.Button(
-            main_frame, text="浏览...", command=self._browse_dest
-        ).grid(row=2, column=2, pady=5)
+            dest_frame, text="浏览...", command=self._browse_dest
+        ).grid(row=0, column=2, padx=5)
         
         # Options frame
         options_frame = ttk.LabelFrame(main_frame, text="选项 (Options)", padding="5")
-        options_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=10)
+        options_frame.grid(row=3, column=0, sticky="ew", pady=10)
         
         ttk.Checkbutton(
             options_frame, 
@@ -222,12 +251,12 @@ class PhotoOrganizerGUI:
         
         # Progress and log area
         log_frame = ttk.LabelFrame(main_frame, text="日志 (Log)", padding="5")
-        log_frame.grid(row=4, column=0, columnspan=3, sticky="nsew", pady=10)
+        log_frame.grid(row=4, column=0, sticky="nsew", pady=10)
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
         
         self.log_text = scrolledtext.ScrolledText(
-            log_frame, height=15, width=70, state='disabled'
+            log_frame, height=12, width=70, state='disabled'
         )
         self.log_text.grid(row=0, column=0, sticky="nsew")
         
@@ -236,16 +265,16 @@ class PhotoOrganizerGUI:
         self.progress_bar = ttk.Progressbar(
             main_frame, variable=self.progress_var, maximum=100
         )
-        self.progress_bar.grid(row=5, column=0, columnspan=3, sticky="ew", pady=5)
+        self.progress_bar.grid(row=5, column=0, sticky="ew", pady=5)
         
         # Status label
         self.status_var = tk.StringVar(value="就绪 (Ready)")
         status_label = ttk.Label(main_frame, textvariable=self.status_var)
-        status_label.grid(row=6, column=0, columnspan=2, sticky="w")
+        status_label.grid(row=6, column=0, sticky="w")
         
         # Buttons frame
         buttons_frame = ttk.Frame(main_frame)
-        buttons_frame.grid(row=7, column=0, columnspan=3, pady=10)
+        buttons_frame.grid(row=7, column=0, pady=10)
         
         self.start_btn = ttk.Button(
             buttons_frame, text="开始整理 (Start)", command=self._start_organizing
@@ -259,6 +288,32 @@ class PhotoOrganizerGUI:
         ttk.Button(
             buttons_frame, text="退出 (Exit)", command=self.root.quit
         ).pack(side="left", padx=5)
+    
+    def _add_src_dir(self):
+        """Add a source directory to the list."""
+        directory = filedialog.askdirectory(title="选择源目录 (Select Source Directory)")
+        if directory and directory not in self.src_dirs:
+            self.src_dirs.append(directory)
+            self.src_listbox.insert(tk.END, directory)
+        elif directory in self.src_dirs:
+            messagebox.showinfo("提示 (Info)", "该目录已添加 (Directory already added)")
+    
+    def _remove_src_dir(self):
+        """Remove selected source directories from the list."""
+        selected_indices = self.src_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("警告 (Warning)", "请先选择要删除的目录 (Please select directories to remove)")
+            return
+        
+        # Delete in reverse order to maintain correct indices
+        for index in reversed(selected_indices):
+            del self.src_dirs[index]
+            self.src_listbox.delete(index)
+    
+    def _clear_src_dirs(self):
+        """Clear all source directories."""
+        self.src_dirs.clear()
+        self.src_listbox.delete(0, tk.END)
         
     def _browse_src(self):
         """Open dialog to select source directory."""
@@ -287,18 +342,24 @@ class PhotoOrganizerGUI:
         
     def _start_organizing(self):
         """Start the organizing process in a separate thread."""
-        src = self.src_var.get().strip()
         dest = self.dest_var.get().strip()
         
         # Validate inputs
-        if not src:
-            messagebox.showerror("错误 (Error)", "请选择源目录 (Please select source directory)")
+        if not self.src_dirs:
+            messagebox.showerror("错误 (Error)", "请至少添加一个源目录 (Please add at least one source directory)")
             return
         if not dest:
             messagebox.showerror("错误 (Error)", "请选择目标目录 (Please select destination directory)")
             return
-        if not os.path.isdir(src):
-            messagebox.showerror("错误 (Error)", f"源目录不存在 (Source directory does not exist): {src}")
+        
+        # Validate all source directories exist
+        invalid_dirs = [d for d in self.src_dirs if not os.path.isdir(d)]
+        if invalid_dirs:
+            messagebox.showerror(
+                "错误 (Error)", 
+                f"以下源目录不存在 (The following source directories do not exist):\n" + 
+                "\n".join(invalid_dirs)
+            )
             return
             
         if self.is_running:
@@ -313,15 +374,14 @@ class PhotoOrganizerGUI:
         
         thread = threading.Thread(
             target=self._organize_thread,
-            args=(src, dest, self.copy_mode_var.get())
+            args=(self.src_dirs.copy(), dest, self.copy_mode_var.get())
         )
         thread.daemon = False  # Allow thread to complete before exit
         thread.start()
         
-    def _organize_thread(self, src, dest, copy_mode):
+    def _organize_thread(self, src_dirs, dest, copy_mode):
         """Background thread for organizing photos."""
         try:
-            source_dir = Path(src)
             dest_dir = Path(dest)
             
             # Track processed files by (size, timestamp) for deduplication
@@ -338,13 +398,22 @@ class PhotoOrganizerGUI:
             }
             
             self._update_status("正在扫描文件... (Scanning files...)")
-            self._log(f"源目录: {source_dir}")
+            self._log(f"源目录数量: {len(src_dirs)}")
+            for i, src_dir in enumerate(src_dirs, 1):
+                self._log(f"  源目录 {i}: {src_dir}")
             self._log(f"目标目录: {dest_dir}")
             self._log(f"模式: {'复制 (Copy)' if copy_mode else '移动 (Move)'}")
             self._log("-" * 50)
             
-            # First, count total files for progress
-            all_files = list(scan_directory(source_dir))
+            # First, count total files from all source directories for progress
+            all_files = []
+            for src_dir in src_dirs:
+                source_dir = Path(src_dir)
+                self._log(f"正在扫描: {source_dir}")
+                files_from_dir = list(scan_directory(source_dir))
+                all_files.extend(files_from_dir)
+                self._log(f"  找到 {len(files_from_dir)} 个文件")
+            
             total_files = len(all_files)
             
             if total_files == 0:
