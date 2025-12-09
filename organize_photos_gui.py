@@ -243,6 +243,29 @@ class PhotoOrganizerGUI:
         options_frame = ttk.LabelFrame(main_frame, text="选项 (Options)", padding="5")
         options_frame.grid(row=3, column=0, sticky="ew", pady=10)
         
+        # Organization Mode
+        mode_frame = ttk.Frame(options_frame)
+        mode_frame.pack(fill="x", pady=2)
+        
+        ttk.Label(mode_frame, text="整理模式 (Mode):").pack(side="left")
+        
+        self.mode_var = tk.StringVar(value="date")
+        ttk.Radiobutton(
+            mode_frame, 
+            text="按日期 (By Date) - YYYY/MM/DD", 
+            variable=self.mode_var, 
+            value="date"
+        ).pack(side="left", padx=10)
+        
+        ttk.Radiobutton(
+            mode_frame, 
+            text="按事件 (By Event) - 聚合相近时间照片", 
+            variable=self.mode_var, 
+            value="event"
+        ).pack(side="left", padx=10)
+        
+        ttk.Separator(options_frame, orient="horizontal").pack(fill="x", pady=5)
+        
         ttk.Checkbutton(
             options_frame, 
             text="复制模式 (保留原文件) / Copy mode (keep original files)",
@@ -432,60 +455,18 @@ class PhotoOrganizerGUI:
             self._log(f"找到 {total_files} 个文件 (Found {total_files} files)")
             self._log("-" * 50)
             
-            for i, filepath in enumerate(all_files):
-                stats['processed'] += 1
-                progress = (i + 1) / total_files * 100
-                self._update_progress(progress)
-                self._update_status(f"处理中: {i+1}/{total_files}")
+            if total_files == 0:
+                self._log("未找到支持的文件 (No supported files found)")
+                self._update_status("完成 (Done) - 未找到文件")
+                return
                 
-                try:
-                    # Get file info for deduplication
-                    file_size = get_file_size(filepath)
-                    shooting_time = get_shooting_time(filepath)
-                    
-                    # Create deduplication key
-                    dedup_key = (file_size, shooting_time)
-                    
-                    # Check for duplicates
-                    if dedup_key in processed_files:
-                        self._log(f"跳过重复文件 (Skip duplicate): {filepath.name}")
-                        stats['skipped_duplicate'] += 1
-                        continue
-                    
-                    # Mark as processed
-                    processed_files.add(dedup_key)
-                    
-                    # Create destination path: {dest}/{Year}/{Month}/{Day}/{filename}
-                    year = str(shooting_time.year)
-                    month = f"{shooting_time.month:02d}"
-                    day = f"{shooting_time.day:02d}"
-                    
-                    dest_folder = dest_dir / year / month / day
-                    dest_folder.mkdir(parents=True, exist_ok=True)
-                    
-                    dest_path = dest_folder / filepath.name
-                    
-                    # Handle filename collision
-                    original_dest = dest_path
-                    dest_path = generate_unique_filename(dest_path)
-                    
-                    if dest_path != original_dest:
-                        stats['renamed'] += 1
-                        self._log(f"重命名 (Renamed): {filepath.name} -> {dest_path.name}")
-                    
-                    # Move or copy the file
-                    if copy_mode:
-                        shutil.copy2(filepath, dest_path)
-                        stats['copied'] += 1
-                        self._log(f"复制 (Copied): {filepath.name} -> {dest_path.relative_to(dest_dir)}")
-                    else:
-                        shutil.move(filepath, dest_path)
-                        stats['moved'] += 1
-                        self._log(f"移动 (Moved): {filepath.name} -> {dest_path.relative_to(dest_dir)}")
-                        
-                except Exception as e:
-                    self._log(f"错误 (Error) {filepath.name}: {e}")
-                    stats['errors'] += 1
+            self._log(f"找到 {total_files} 个文件 (Found {total_files} files)")
+            self._log("-" * 50)
+            
+            if self.mode_var.get() == 'event':
+                self._process_by_event(all_files, dest_dir, copy_mode, stats, processed_files)
+            else:
+                self._process_by_date(all_files, dest_dir, copy_mode, stats, processed_files)
             
             # Print summary
             self._log("-" * 50)
@@ -506,14 +487,174 @@ class PhotoOrganizerGUI:
         finally:
             self.is_running = False
             self.root.after(0, lambda: self.start_btn.config(state='normal'))
-            
-    def _update_progress(self, value):
-        """Update progress bar from any thread."""
-        self.root.after(0, lambda: self.progress_var.set(value))
+    
+    def _process_by_date(self, all_files, dest_dir, copy_mode, stats, processed_files):
+        """Process files by date (Year/Month/Day)."""
+        total_files = len(all_files)
         
-    def _update_status(self, status):
-        """Update status label from any thread."""
-        self.root.after(0, lambda: self.status_var.set(status))
+        for i, filepath in enumerate(all_files):
+            stats['processed'] += 1
+            progress = (i + 1) / total_files * 100
+            self._update_progress(progress)
+            self._update_status(f"处理中: {i+1}/{total_files}")
+            
+            try:
+                # Get file info for deduplication
+                file_size = get_file_size(filepath)
+                shooting_time = get_shooting_time(filepath)
+                
+                # Create deduplication key
+                dedup_key = (file_size, shooting_time)
+                
+                # Check for duplicates
+                if dedup_key in processed_files:
+                    self._log(f"跳过重复文件 (Skip duplicate): {filepath.name}")
+                    stats['skipped_duplicate'] += 1
+                    continue
+                
+                # Mark as processed
+                processed_files.add(dedup_key)
+                
+                # Create destination path: {dest}/{Year}/{Month}/{Day}/{filename}
+                year = str(shooting_time.year)
+                month = f"{shooting_time.month:02d}"
+                day = f"{shooting_time.day:02d}"
+                
+                dest_folder = dest_dir / year / month / day
+                dest_folder.mkdir(parents=True, exist_ok=True)
+                
+                dest_path = dest_folder / filepath.name
+                
+                self._move_or_copy_file(filepath, dest_path, dest_dir, copy_mode, stats)
+                    
+            except Exception as e:
+                self._log(f"错误 (Error) {filepath.name}: {e}")
+                stats['errors'] += 1
+
+    def _process_by_event(self, all_files, dest_dir, copy_mode, stats, processed_files):
+        """Process files by event (clustering by time)."""
+        total_files = len(all_files)
+        self._update_status("正在分析文件时间... (Analyzing file times...)")
+        
+        # 1. Collect file info
+        file_infos = []
+        for i, filepath in enumerate(all_files):
+            try:
+                shooting_time = get_shooting_time(filepath)
+                file_size = get_file_size(filepath)
+                file_infos.append({
+                    'path': filepath,
+                    'time': shooting_time,
+                    'size': file_size
+                })
+            except Exception as e:
+                self._log(f"读取信息失败 (Read info failed) {filepath.name}: {e}")
+                stats['errors'] += 1
+            
+            if i % 10 == 0:
+                progress = (i + 1) / total_files * 50  # First 50% for analysis
+                self._update_progress(progress)
+        
+        # 2. Sort by time
+        file_infos.sort(key=lambda x: x['time'])
+        
+        # 3. Cluster events
+        # Threshold: 2 hours (7200 seconds)
+        EVENT_THRESHOLD = 7200
+        
+        if not file_infos:
+            return
+
+        current_event_files = []
+        last_time = None
+        
+        # Process clusters
+        total_infos = len(file_infos)
+        processed_count = 0
+        
+        # Helper to process a batch of files as one event
+        def process_event_batch(files_batch):
+            if not files_batch:
+                return
+                
+            # Determine event folder name from the first file's time
+            start_time = files_batch[0]['time']
+            # Format: YYYY-MM-DD_HHMM
+            event_folder_name = start_time.strftime("%Y-%m-%d_%H%M")
+            dest_folder = dest_dir / event_folder_name
+            dest_folder.mkdir(parents=True, exist_ok=True)
+            
+            self._log(f"创建事件文件夹 (Event): {event_folder_name} ({len(files_batch)} files)")
+            
+            for file_info in files_batch:
+                filepath = file_info['path']
+                dedup_key = (file_info['size'], file_info['time'])
+                
+                stats['processed'] += 1
+                
+                if dedup_key in processed_files:
+                    self._log(f"  跳过重复 (Skip dup): {filepath.name}")
+                    stats['skipped_duplicate'] += 1
+                    continue
+                
+                processed_files.add(dedup_key)
+                
+                dest_path = dest_folder / filepath.name
+                try:
+                    self._move_or_copy_file(filepath, dest_path, dest_dir, copy_mode, stats)
+                except Exception as e:
+                    self._log(f"  错误 (Error) {filepath.name}: {e}")
+                    stats['errors'] += 1
+
+        # Iterate and cluster
+        for i, info in enumerate(file_infos):
+            current_time = info['time']
+            
+            if last_time is None:
+                current_event_files.append(info)
+            else:
+                time_diff = (current_time - last_time).total_seconds()
+                if time_diff > EVENT_THRESHOLD:
+                    # New event detected, process previous batch
+                    process_event_batch(current_event_files)
+                    current_event_files = [info]
+                else:
+                    current_event_files.append(info)
+            
+            last_time = current_time
+            
+            # Update progress (50% - 100%)
+            processed_count += 1
+            if processed_count % 5 == 0:
+                progress = 50 + (processed_count / total_infos * 50)
+                self._update_progress(progress)
+                self._update_status(f"整理事件中: {processed_count}/{total_infos}")
+
+        # Process the last batch
+        if current_event_files:
+            process_event_batch(current_event_files)
+            
+        self._update_progress(100)
+
+    def _move_or_copy_file(self, filepath, dest_path, dest_dir, copy_mode, stats):
+        """Helper to move or copy a file with rename logic."""
+        # Handle filename collision
+        original_dest = dest_path
+        dest_path = generate_unique_filename(dest_path)
+        
+        if dest_path != original_dest:
+            stats['renamed'] += 1
+            self._log(f"  重命名 (Renamed): {filepath.name} -> {dest_path.name}")
+        
+        # Move or copy the file
+        if copy_mode:
+            shutil.copy2(filepath, dest_path)
+            stats['copied'] += 1
+            # self._log(f"  复制 (Copied): {filepath.name}") # Reduce log spam
+        else:
+            shutil.move(filepath, dest_path)
+            stats['moved'] += 1
+            # self._log(f"  移动 (Moved): {filepath.name}")
 
 
 def main():
