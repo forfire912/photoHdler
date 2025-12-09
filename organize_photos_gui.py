@@ -276,10 +276,18 @@ class PhotoOrganizerGUI:
         buttons_frame = ttk.Frame(main_frame)
         buttons_frame.grid(row=7, column=0, pady=10)
         
+        # Start button with prominent styling
+        style = ttk.Style()
+        style.configure("Start.TButton", font=("Arial", 11, "bold"))
+        
         self.start_btn = ttk.Button(
-            buttons_frame, text="开始整理 (Start)", command=self._start_organizing
+            buttons_frame, 
+            text="▶ 开始整理 (Start Organizing)", 
+            command=self._start_organizing,
+            style="Start.TButton",
+            width=25
         )
-        self.start_btn.pack(side="left", padx=5)
+        self.start_btn.pack(side="left", padx=10)
         
         ttk.Button(
             buttons_frame, text="清除日志 (Clear Log)", command=self._clear_log
