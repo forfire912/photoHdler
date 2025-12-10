@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-from PIL import Image
+from PIL import Image, ExifTags
 
 # Supported file extensions
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png'}
@@ -106,6 +106,39 @@ def get_file_size(filepath):
         File size in bytes
     """
     return os.path.getsize(filepath)
+
+
+def get_camera_model(filepath):
+    """
+    Extract Camera Model from image EXIF data.
+    
+    Args:
+        filepath: Path to the image file
+        
+    Returns:
+        String representing camera model, or 'Unknown_Device'
+    """
+    try:
+        ext = Path(filepath).suffix.lower()
+        if ext not in IMAGE_EXTENSIONS:
+            return "Video"
+            
+        with Image.open(filepath) as img:
+            exif = img.getexif()
+            if exif:
+                # Look for Model tag (272)
+                if 272 in exif:
+                    model = exif[272]
+                    # Clean up string (remove null bytes, extra spaces)
+                    return str(model).strip().replace('\x00', '')
+                
+                # Look for Make tag (271) as fallback
+                if 271 in exif:
+                    return str(exif[271]).strip().replace('\x00', '')
+                    
+    except Exception:
+        pass
+    return "Unknown_Device"
 
 
 def scan_directory(source_dir):
@@ -264,6 +297,28 @@ class PhotoOrganizerGUI:
             value="event"
         ).pack(side="left", padx=10)
         
+        ttk.Radiobutton(
+            mode_frame, 
+            text="自定义 (Custom)", 
+            variable=self.mode_var, 
+            value="custom",
+            command=self._toggle_custom_template
+        ).pack(side="left", padx=10)
+        
+        # Custom Template Frame (Hidden by default)
+        self.template_frame = ttk.Frame(options_frame)
+        self.template_frame.pack(fill="x", pady=5)
+        
+        ttk.Label(self.template_frame, text="路径模板 (Template):").pack(side="left")
+        self.template_var = tk.StringVar(value="{year}/{month}/{day}")
+        ttk.Entry(self.template_frame, textvariable=self.template_var, width=40).pack(side="left", padx=5)
+        
+        help_text = "可用变量: {year}, {month}, {day}, {camera}, {ext}"
+        ttk.Label(self.template_frame, text=help_text, font=("Arial", 8), foreground="gray").pack(side="left", padx=5)
+        
+        # Initial toggle state
+        self._toggle_custom_template()
+        
         ttk.Separator(options_frame, orient="horizontal").pack(fill="x", pady=5)
         
         ttk.Checkbutton(
@@ -357,6 +412,14 @@ class PhotoOrganizerGUI:
         directory = filedialog.askdirectory(title="选择目标目录 (Select Destination Directory)")
         if directory:
             self.dest_var.set(directory)
+    
+    def _toggle_custom_template(self):
+        """Show/hide custom template input based on mode."""
+        if self.mode_var.get() == 'custom':
+            # Use pack_forget first to ensure clean state, then pack
+            self.template_frame.pack(fill="x", pady=5, after=self.template_frame.master.winfo_children()[0])
+        else:
+            self.template_frame.pack_forget()
             
     def _log(self, message):
         """Add message to log area."""
@@ -465,6 +528,12 @@ class PhotoOrganizerGUI:
             
             if self.mode_var.get() == 'event':
                 self._process_by_event(all_files, dest_dir, copy_mode, stats, processed_files)
+            elif self.mode_var.get() == 'custom':
+                template = self.template_var.get().strip()
+                if not template:
+                    self._log("错误: 模板为空，使用默认模板 (Error: Empty template, using default)")
+                    template = "{year}/{month}/{day}"
+                self._process_by_custom(all_files, dest_dir, copy_mode, stats, processed_files, template)
             else:
                 self._process_by_date(all_files, dest_dir, copy_mode, stats, processed_files)
             
@@ -635,6 +704,60 @@ class PhotoOrganizerGUI:
             process_event_batch(current_event_files)
             
         self._update_progress(100)
+
+    def _process_by_custom(self, all_files, dest_dir, copy_mode, stats, processed_files, template):
+        """Process files using a custom path template."""
+        total_files = len(all_files)
+        
+        for i, filepath in enumerate(all_files):
+            stats['processed'] += 1
+            progress = (i + 1) / total_files * 100
+            self._update_progress(progress)
+            self._update_status(f"处理中: {i+1}/{total_files}")
+            
+            try:
+                # Get file info
+                file_size = get_file_size(filepath)
+                shooting_time = get_shooting_time(filepath)
+                
+                # Deduplication
+                dedup_key = (file_size, shooting_time)
+                if dedup_key in processed_files:
+                    self._log(f"跳过重复文件 (Skip duplicate): {filepath.name}")
+                    stats['skipped_duplicate'] += 1
+                    continue
+                processed_files.add(dedup_key)
+                
+                # Prepare variables for template
+                vars = {
+                    'year': str(shooting_time.year),
+                    'month': f"{shooting_time.month:02d}",
+                    'day': f"{shooting_time.day:02d}",
+                    'ext': filepath.suffix.lower().replace('.', ''),
+                    'camera': get_camera_model(filepath).replace('/', '_').replace('\\', '_').strip(),
+                    'type': 'Photo' if filepath.suffix.lower() in IMAGE_EXTENSIONS else 'Video'
+                }
+                
+                # Generate relative path from template
+                try:
+                    rel_path_str = template.format(**vars)
+                    # Sanitize path components
+                    rel_path = Path(rel_path_str)
+                except Exception as e:
+                    self._log(f"模板错误 (Template Error): {e}")
+                    # Fallback to date
+                    rel_path = Path(vars['year']) / vars['month'] / vars['day']
+                
+                dest_folder = dest_dir / rel_path
+                dest_folder.mkdir(parents=True, exist_ok=True)
+                
+                dest_path = dest_folder / filepath.name
+                
+                self._move_or_copy_file(filepath, dest_path, dest_dir, copy_mode, stats)
+                    
+            except Exception as e:
+                self._log(f"错误 (Error) {filepath.name}: {e}")
+                stats['errors'] += 1
 
     def _move_or_copy_file(self, filepath, dest_path, dest_dir, copy_mode, stats):
         """Helper to move or copy a file with rename logic."""
