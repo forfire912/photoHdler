@@ -852,6 +852,14 @@ class PhotoOrganizerGUI:
         else:
             self._log("没有发现空目录 (No empty directories found)")
 
+    def _update_progress(self, value):
+        """Update progress bar from any thread."""
+        self.root.after(0, lambda: self.progress_var.set(value))
+        
+    def _update_status(self, status):
+        """Update status label from any thread."""
+        self.root.after(0, lambda: self.status_var.set(status))
+
 
 def main():
     """Main entry point for GUI application."""
