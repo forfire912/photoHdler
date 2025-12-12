@@ -199,6 +199,7 @@ class PhotoOrganizerGUI:
         self.src_dirs = []  # List of source directories
         self.dest_var = tk.StringVar()
         self.copy_mode_var = tk.BooleanVar(value=False)
+        self.clean_empty_dirs_var = tk.BooleanVar(value=True)
         self.is_running = False
         
         self._create_widgets()
@@ -325,6 +326,12 @@ class PhotoOrganizerGUI:
             options_frame, 
             text="复制模式 (保留原文件) / Copy mode (keep original files)",
             variable=self.copy_mode_var
+        ).pack(anchor="w")
+        
+        ttk.Checkbutton(
+            options_frame, 
+            text="移动后清理空目录 / Delete empty folders after move",
+            variable=self.clean_empty_dirs_var
         ).pack(anchor="w")
         
         # Progress and log area
@@ -545,6 +552,10 @@ class PhotoOrganizerGUI:
             self._log(f"  跳过重复 (Duplicates skipped): {stats['skipped_duplicate']}")
             self._log(f"  重命名 (Renamed): {stats['renamed']}")
             self._log(f"  错误 (Errors): {stats['errors']}")
+            
+            # Clean up empty directories if requested and not in copy mode
+            if not copy_mode and self.clean_empty_dirs_var.get():
+                self._cleanup_empty_dirs(src_dirs)
             
             self._update_status("完成 (Done)")
             messagebox.showinfo("完成 (Done)", "文件整理完成! (File organization complete!)")
@@ -778,6 +789,31 @@ class PhotoOrganizerGUI:
             shutil.move(filepath, dest_path)
             stats['moved'] += 1
             # self._log(f"  移动 (Moved): {filepath.name}")
+
+    def _cleanup_empty_dirs(self, src_dirs):
+        """Clean up empty directories in source paths."""
+        self._log("-" * 50)
+        self._log("正在清理空目录... (Cleaning up empty directories...)")
+        removed_count = 0
+        
+        for src_dir in src_dirs:
+            # Walk bottom-up to remove nested empty dirs
+            for root, dirs, files in os.walk(src_dir, topdown=False):
+                for name in dirs:
+                    dir_path = Path(root) / name
+                    try:
+                        # Only remove if empty
+                        if not any(dir_path.iterdir()):
+                            dir_path.rmdir()
+                            removed_count += 1
+                            self._log(f"  删除空目录 (Removed): {dir_path}")
+                    except Exception:
+                        pass
+        
+        if removed_count > 0:
+            self._log(f"共删除 {removed_count} 个空目录 (Removed {removed_count} empty directories)")
+        else:
+            self._log("没有发现空目录 (No empty directories found)")
 
 
 def main():
