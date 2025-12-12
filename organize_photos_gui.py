@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Photo and Video Organizer - GUI Version
+Photo and Video Organizer - GUI Version v0.7.0
 
 A graphical interface to manage and organize a large collection of photos and videos.
 It scans a source directory, extracts shooting dates, deduplicates based on
@@ -8,6 +8,7 @@ file size and timestamp, and organizes files into a Year/Month/Day structure.
 """
 
 import os
+import re
 import shutil
 import threading
 import tkinter as tk
@@ -18,8 +19,21 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 from PIL import Image, ExifTags
 
 # Supported file extensions
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png'}
-VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi'}
+IMAGE_EXTENSIONS = {
+    # Common formats
+    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.heic', '.heif',
+    # RAW formats (Canon, Nikon, Sony, Adobe, Olympus, Panasonic, Fuji, Pentax, etc.)
+    '.raw', '.cr2', '.cr3', '.nef', '.arw', '.dng', '.orf', '.rw2', '.raf', '.pef', '.srw',
+    '.3fr', '.ari', '.bay', '.cap', '.crw', '.dcs', '.dcr', '.drf', '.eip', '.erf', '.fff',
+    '.iiq', '.k25', '.kdc', '.mdc', '.mef', '.mos', '.mrw', '.nrw', '.ptx', '.pxn', '.r3d',
+    '.rwl', '.rwz', '.sr2', '.srf', '.x3f'
+}
+VIDEO_EXTENSIONS = {
+    # Common formats
+    '.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg',
+    # HD/Camcorder/Older formats
+    '.m2ts', '.mts', '.3gp', '.3g2', '.ts', '.vob', '.divx', '.xvid', '.rm', '.rmvb', '.asf', '.dv'
+}
 SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
 
@@ -201,6 +215,7 @@ class PhotoOrganizerGUI:
         self.copy_mode_var = tk.BooleanVar(value=False)
         self.clean_empty_dirs_var = tk.BooleanVar(value=True)
         self.delete_duplicates_var = tk.BooleanVar(value=False)
+        self.rename_files_var = tk.BooleanVar(value=False)
         self.is_running = False
         
         self._create_widgets()
@@ -339,6 +354,12 @@ class PhotoOrganizerGUI:
             options_frame, 
             text="移动时删除重复文件 / Delete duplicates when moving",
             variable=self.delete_duplicates_var
+        ).pack(anchor="w")
+        
+        ttk.Checkbutton(
+            options_frame, 
+            text="按拍摄时间重命名文件 / Rename files by Date (YYYYMMDD_HHMMSS)",
+            variable=self.rename_files_var
         ).pack(anchor="w")
         
         # Progress and log area
@@ -622,9 +643,11 @@ class PhotoOrganizerGUI:
                 dest_folder = dest_dir / year / month / day
                 dest_folder.mkdir(parents=True, exist_ok=True)
                 
-                dest_path = dest_folder / filepath.name
+                # Determine filename
+                filename = self._get_target_filename(filepath, shooting_time)
+                dest_path = dest_folder / filename
                 
-                self._move_or_copy_file(filepath, dest_path, dest_dir, copy_mode, stats)
+                self._move_or_copy_file(filepath, dest_path, dest_dir, copy_mode, stats, file_size, shooting_time)
                     
             except Exception as e:
                 self._log(f"错误 (Error) {filepath.name}: {e}")
@@ -707,9 +730,12 @@ class PhotoOrganizerGUI:
                 
                 processed_files.add(dedup_key)
                 
-                dest_path = dest_folder / filepath.name
+                # Determine filename
+                filename = self._get_target_filename(filepath, file_info['time'])
+                dest_path = dest_folder / filename
+                
                 try:
-                    self._move_or_copy_file(filepath, dest_path, dest_dir, copy_mode, stats)
+                    self._move_or_copy_file(filepath, dest_path, dest_dir, copy_mode, stats, file_info['size'], file_info['time'])
                 except Exception as e:
                     self._log(f"  错误 (Error) {filepath.name}: {e}")
                     stats['errors'] += 1
@@ -799,16 +825,99 @@ class PhotoOrganizerGUI:
                 dest_folder = dest_dir / rel_path
                 dest_folder.mkdir(parents=True, exist_ok=True)
                 
-                dest_path = dest_folder / filepath.name
+                filename = self._get_target_filename(filepath, shooting_time)
+                dest_path = dest_folder / filename
                 
-                self._move_or_copy_file(filepath, dest_path, dest_dir, copy_mode, stats)
+                self._move_or_copy_file(filepath, dest_path, dest_dir, copy_mode, stats, file_size, shooting_time)
                     
             except Exception as e:
                 self._log(f"错误 (Error) {filepath.name}: {e}")
                 stats['errors'] += 1
 
-    def _move_or_copy_file(self, filepath, dest_path, dest_dir, copy_mode, stats):
+    def _get_target_filename(self, filepath, shooting_time):
+        """Generate target filename based on settings."""
+        if not self.rename_files_var.get():
+            return filepath.name
+            
+        # Format: YYYYMMDD_HHMMSS
+        timestamp_str = shooting_time.strftime("%Y%m%d_%H%M%S")
+        suffix = filepath.suffix.lower()
+        return f"{timestamp_str}{suffix}"
+
+    def _move_or_copy_file(self, filepath, dest_path, dest_dir, copy_mode, stats, src_size=None, src_time=None):
         """Helper to move or copy a file with rename logic."""
+        
+        # Enhanced Duplicate Check: Check for existing files in the target folder
+        # that match the filename pattern (including _1, _2 variations)
+        if src_size is not None and src_time is not None:
+            dest_folder = dest_path.parent
+            if dest_folder.exists():
+                target_stem = dest_path.stem
+                target_suffix = dest_path.suffix.lower()
+                
+                # Determine base stem (handle cases like IMG_1234_1 -> IMG_1234)
+                base_stem = target_stem
+                # Check if stem ends with _\d+
+                m = re.search(r'_(\d+)$', target_stem)
+                if m:
+                    base_stem = target_stem[:m.start()]
+                
+                found_duplicate = False
+                duplicate_file = None
+
+                try:
+                    # Iterate over files in the destination folder
+                    for entry in dest_folder.iterdir():
+                        if not entry.is_file():
+                            continue
+                            
+                        # Check if the file is a candidate
+                        entry_suffix = entry.suffix.lower()
+                        if entry_suffix != target_suffix:
+                            continue
+                            
+                        entry_stem = entry.stem
+                        is_candidate = False
+                        
+                        # Check against base_stem (e.g. IMG_1234)
+                        if entry_stem == base_stem:
+                            is_candidate = True
+                        # Check against variations (e.g. IMG_1234_1, IMG_1234_2)
+                        elif entry_stem.startswith(f"{base_stem}_"):
+                            # Check if the rest is a number
+                            suffix_part = entry_stem[len(base_stem)+1:]
+                            if suffix_part.isdigit():
+                                is_candidate = True
+                        
+                        if is_candidate:
+                            # Check metadata match
+                            try:
+                                d_size = get_file_size(entry)
+                                d_time = get_shooting_time(entry)
+                                if src_size == d_size and src_time == d_time:
+                                    found_duplicate = True
+                                    duplicate_file = entry
+                                    break
+                            except Exception:
+                                pass
+                                
+                    if found_duplicate:
+                        if not copy_mode and self.delete_duplicates_var.get():
+                            try:
+                                os.remove(filepath)
+                                self._log(f"  删除重复文件 (Deleted duplicate - found {duplicate_file.name}): {filepath.name}")
+                                stats['deleted_duplicate'] += 1
+                            except Exception as e:
+                                self._log(f"  删除重复失败 (Failed delete dup): {e}")
+                                stats['errors'] += 1
+                        else:
+                            self._log(f"  跳过重复文件 (Skip duplicate - found {duplicate_file.name}): {filepath.name}")
+                            stats['skipped_duplicate'] += 1
+                        return
+                        
+                except Exception as e:
+                    self._log(f"  检查目标目录失败 (Check dest dir failed): {e}")
+
         # Handle filename collision
         original_dest = dest_path
         dest_path = generate_unique_filename(dest_path)
