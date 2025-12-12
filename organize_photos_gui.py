@@ -200,6 +200,7 @@ class PhotoOrganizerGUI:
         self.dest_var = tk.StringVar()
         self.copy_mode_var = tk.BooleanVar(value=False)
         self.clean_empty_dirs_var = tk.BooleanVar(value=True)
+        self.delete_duplicates_var = tk.BooleanVar(value=False)
         self.is_running = False
         
         self._create_widgets()
@@ -332,6 +333,12 @@ class PhotoOrganizerGUI:
             options_frame, 
             text="移动后清理空目录 / Delete empty folders after move",
             variable=self.clean_empty_dirs_var
+        ).pack(anchor="w")
+        
+        ttk.Checkbutton(
+            options_frame, 
+            text="移动时删除重复文件 / Delete duplicates when moving",
+            variable=self.delete_duplicates_var
         ).pack(anchor="w")
         
         # Progress and log area
@@ -492,6 +499,7 @@ class PhotoOrganizerGUI:
             stats = {
                 'processed': 0,
                 'skipped_duplicate': 0,
+                'deleted_duplicate': 0,
                 'moved': 0,
                 'copied': 0,
                 'renamed': 0,
@@ -550,6 +558,8 @@ class PhotoOrganizerGUI:
             self._log(f"  处理文件总数 (Total processed): {stats['processed']}")
             self._log(f"  {'复制 (Copied)' if copy_mode else '移动 (Moved)'}: {stats['copied'] if copy_mode else stats['moved']}")
             self._log(f"  跳过重复 (Duplicates skipped): {stats['skipped_duplicate']}")
+            if stats['deleted_duplicate'] > 0:
+                self._log(f"  删除重复 (Duplicates deleted): {stats['deleted_duplicate']}")
             self._log(f"  重命名 (Renamed): {stats['renamed']}")
             self._log(f"  错误 (Errors): {stats['errors']}")
             
@@ -588,8 +598,17 @@ class PhotoOrganizerGUI:
                 
                 # Check for duplicates
                 if dedup_key in processed_files:
-                    self._log(f"跳过重复文件 (Skip duplicate): {filepath.name}")
-                    stats['skipped_duplicate'] += 1
+                    if not copy_mode and self.delete_duplicates_var.get():
+                        try:
+                            os.remove(filepath)
+                            self._log(f"删除重复文件 (Deleted duplicate): {filepath.name}")
+                            stats['deleted_duplicate'] += 1
+                        except Exception as e:
+                            self._log(f"删除重复文件失败 (Failed to delete duplicate) {filepath.name}: {e}")
+                            stats['errors'] += 1
+                    else:
+                        self._log(f"跳过重复文件 (Skip duplicate): {filepath.name}")
+                        stats['skipped_duplicate'] += 1
                     continue
                 
                 # Mark as processed
@@ -673,8 +692,17 @@ class PhotoOrganizerGUI:
                 stats['processed'] += 1
                 
                 if dedup_key in processed_files:
-                    self._log(f"  跳过重复 (Skip dup): {filepath.name}")
-                    stats['skipped_duplicate'] += 1
+                    if not copy_mode and self.delete_duplicates_var.get():
+                        try:
+                            os.remove(filepath)
+                            self._log(f"  删除重复 (Deleted dup): {filepath.name}")
+                            stats['deleted_duplicate'] += 1
+                        except Exception as e:
+                            self._log(f"  删除重复失败 (Failed delete dup) {filepath.name}: {e}")
+                            stats['errors'] += 1
+                    else:
+                        self._log(f"  跳过重复 (Skip dup): {filepath.name}")
+                        stats['skipped_duplicate'] += 1
                     continue
                 
                 processed_files.add(dedup_key)
@@ -734,8 +762,17 @@ class PhotoOrganizerGUI:
                 # Deduplication
                 dedup_key = (file_size, shooting_time)
                 if dedup_key in processed_files:
-                    self._log(f"跳过重复文件 (Skip duplicate): {filepath.name}")
-                    stats['skipped_duplicate'] += 1
+                    if not copy_mode and self.delete_duplicates_var.get():
+                        try:
+                            os.remove(filepath)
+                            self._log(f"删除重复文件 (Deleted duplicate): {filepath.name}")
+                            stats['deleted_duplicate'] += 1
+                        except Exception as e:
+                            self._log(f"删除重复文件失败 (Failed to delete duplicate) {filepath.name}: {e}")
+                            stats['errors'] += 1
+                    else:
+                        self._log(f"跳过重复文件 (Skip duplicate): {filepath.name}")
+                        stats['skipped_duplicate'] += 1
                     continue
                 processed_files.add(dedup_key)
                 
